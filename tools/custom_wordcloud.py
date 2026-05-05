@@ -4,6 +4,8 @@ import argparse
 import random
 from pathlib import Path
 
+from typing import Optional
+
 import numpy as np
 import pandas as pd
 from PIL import Image, ImageFilter, ImageOps
@@ -12,8 +14,6 @@ from wordcloud import WordCloud
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 CSV_PATH = ROOT_DIR / "data" / "xhs" / "analysis" / "top30_words.csv"
-MASK_PATH = ROOT_DIR / "assets" / "wordcloud_mask.png"
-FONT_PATH = ROOT_DIR / "assets" / "wordcloud_font.otf"
 OUTPUT_PATH = ROOT_DIR / "data" / "xhs" / "analysis" / "beautiful_wordcloud.png"
 
 PALETTE = [
@@ -79,8 +79,8 @@ def elegant_color_func(
 
 def create_wordcloud(
     data_dict: dict[str, int],
-    img_array: np.ndarray,
-    font_path: Path,
+    img_array: Optional[np.ndarray],
+    font_path: Optional[Path],
     max_words: int,
     margin: int,
     prefer_horizontal: float,
@@ -88,22 +88,26 @@ def create_wordcloud(
     min_font_size: int,
     repeat: bool,
 ) -> WordCloud:
-    wordcloud = WordCloud(
-        font_path=str(font_path),
-        mask=img_array,
-        background_color="rgba(255, 255, 255, 0)",
-        mode="RGBA",
-        width=2000,
-        height=2000,
-        max_words=max_words,
-        collocations=False,
-        repeat=repeat,
-        margin=margin,
-        prefer_horizontal=prefer_horizontal,
-        relative_scaling=relative_scaling,
-        min_font_size=min_font_size,
-        random_state=42,
-    ).generate_from_frequencies(data_dict)
+    wordcloud_kwargs: dict[str, object] = {
+        "mask": img_array,
+        "background_color": "white",
+        "mode": "RGB",
+        "width": 2000,
+        "height": 2000,
+        "max_words": max_words,
+        "collocations": False,
+        "repeat": repeat,
+        "margin": margin,
+        "prefer_horizontal": prefer_horizontal,
+        "relative_scaling": relative_scaling,
+        "min_font_size": min_font_size,
+        "random_state": 42,
+    }
+
+    if font_path is not None:
+        wordcloud_kwargs["font_path"] = str(font_path)
+
+    wordcloud = WordCloud(**wordcloud_kwargs).generate_from_frequencies(data_dict)
 
     return wordcloud.recolor(color_func=elegant_color_func, random_state=random.Random(42))
 
@@ -111,8 +115,8 @@ def create_wordcloud(
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Generate a custom wordcloud from CSV frequencies.")
     parser.add_argument("--csv", type=Path, default=CSV_PATH, help="Path to the frequency CSV file.")
-    parser.add_argument("--mask", type=Path, default=MASK_PATH, help="Path to the mask image.")
-    parser.add_argument("--font", type=Path, default=FONT_PATH, help="Path to the font file.")
+    parser.add_argument("--mask", type=Path, help="Optional path to the mask image.")
+    parser.add_argument("--font", type=Path, help="Optional path to the font file.")
     parser.add_argument("--output", type=Path, default=OUTPUT_PATH, help="Path to save the output PNG.")
     parser.add_argument("--debug-mask-output", type=Path, help="Optional path to save the processed binary mask.")
     parser.add_argument("--max-words", type=int, default=100, help="Maximum number of words to draw.")
@@ -127,8 +131,15 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     csv_path = args.csv if args.csv.is_absolute() else ROOT_DIR / args.csv
-    mask_path = args.mask if args.mask.is_absolute() else ROOT_DIR / args.mask
-    font_path = args.font if args.font.is_absolute() else ROOT_DIR / args.font
+
+    mask_path: Optional[Path] = None
+    if args.mask is not None:
+        mask_path = args.mask if args.mask.is_absolute() else ROOT_DIR / args.mask
+
+    font_path: Optional[Path] = None
+    if args.font is not None:
+        font_path = args.font if args.font.is_absolute() else ROOT_DIR / args.font
+
     output_path = args.output if args.output.is_absolute() else ROOT_DIR / args.output
     debug_mask_output = None
     if args.debug_mask_output:
@@ -136,16 +147,21 @@ def main() -> None:
 
     if not csv_path.exists():
         raise FileNotFoundError(f"CSV file not found: {csv_path}")
-    if not mask_path.exists():
+
+    if mask_path is not None and not mask_path.exists():
         raise FileNotFoundError(f"Mask image not found: {mask_path}")
-    if not font_path.exists():
+    if font_path is not None and not font_path.exists():
         raise FileNotFoundError(f"Font file not found: {font_path}")
 
     data_dict = load_word_frequencies(csv_path)
-    img_array = build_mask(mask_path)
-    if debug_mask_output is not None:
-        debug_mask_output.parent.mkdir(parents=True, exist_ok=True)
-        Image.fromarray(img_array).save(debug_mask_output)
+
+    img_array: Optional[np.ndarray] = None
+    if mask_path is not None:
+        img_array = build_mask(mask_path)
+        if debug_mask_output is not None:
+            debug_mask_output.parent.mkdir(parents=True, exist_ok=True)
+            Image.fromarray(img_array).save(debug_mask_output)
+
     wordcloud = create_wordcloud(
         data_dict=data_dict,
         img_array=img_array,
